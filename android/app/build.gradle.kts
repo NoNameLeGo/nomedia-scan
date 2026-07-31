@@ -66,7 +66,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
-    implementation("dev.rikka.shizuku:api:13.1.5")
+    // 12.2.0：13.x 的 newProcess 变为 private，12.2.0 仍是公开 API
+    implementation("dev.rikka.shizuku:api:12.2.0")
 
     testImplementation("junit:junit:4.13.2")
 }
