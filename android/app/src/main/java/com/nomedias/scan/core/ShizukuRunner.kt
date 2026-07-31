@@ -1,11 +1,9 @@
 package com.nomedias.scan.core
 
 import android.content.pm.PackageManager
-import android.os.IParcelFileDescriptor
 import android.util.Log
-import dev.rikka.shizuku.Shizuku
+import rikka.shizuku.Shizuku
 import java.io.BufferedReader
-import java.io.FileInputStream
 import java.io.InputStreamReader
 
 /**
@@ -64,18 +62,17 @@ object ShizukuRunner {
     fun exec(cmd: String): String {
         if (!isConnected) throw IllegalStateException("Shizuku 未连接")
         if (!hasPermission) throw IllegalStateException("Shizuku 未授权")
-        val pfd: IParcelFileDescriptor = Shizuku.newProcess(arrayOf("sh", "-c", cmd), null, null)
+        val process = Shizuku.newProcess(arrayOf("sh", "-c", cmd), null, null)
             ?: throw IllegalStateException("Shizuku 无法启动 shell 进程")
-        val output = try {
-            BufferedReader(InputStreamReader(FileInputStream(pfd.fileDescriptor))).readText()
+        return try {
+            BufferedReader(InputStreamReader(process.inputStream)).readText()
         } finally {
             try {
-                pfd.close()
+                process.waitFor()
             } catch (e: Throwable) {
                 // ignore
             }
         }
-        return output
     }
 
     /** 返回非零即认为失败 */

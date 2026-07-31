@@ -27,7 +27,7 @@ import com.nomedias.scan.core.Phase
 import com.nomedias.scan.core.ScanManager
 import com.nomedias.scan.core.ScanService
 import com.nomedias.scan.core.ShizukuRunner
-import dev.rikka.shizuku.Shizuku
+import rikka.shizuku.Shizuku
 import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {

@@ -26,7 +26,7 @@ class ShizukuFileOp : FileOp {
         if (n > 0) {
             ShizukuRunner.exec(
                 "find ${shq(rootPath)} -type f -name \"*.nomedia.bak\" " +
-                        "-exec sh -c 'mv \"$1\" \"${1%.bak}\"' _ {} \\;"
+                        "-exec sh -c 'mv \"\\$1\" \"\\${1%.bak}\"' _ {} \\;"
             )
         }
         return n
