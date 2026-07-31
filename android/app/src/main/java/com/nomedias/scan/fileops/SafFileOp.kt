@@ -25,8 +25,14 @@ class SafFileOp(private val context: Context, private val treeUri: Uri?) : FileO
     override suspend fun moveOut(rootPath: String): Int = withContext(Dispatchers.IO) {
         val root = rootDoc() ?: return@withContext 0
         val found = mutableListOf<String>()
-        dfsFind(root, "", found) { doc ->
-            doc.delete()
+        // 根目录优先：绝大多数场景 .nomedia 只在根目录，一次 findFile 即完成（秒级）
+        val rootNomedia = root.findFile(".nomedia")
+        if (rootNomedia != null) {
+            rootNomedia.delete()
+            found.add("") // 相对路径为空 = 根目录
+        } else {
+            // 兜底：个别场景 .nomedia 在子目录，才做全树遍历
+            dfsFind(root, "", found) { doc -> doc.delete() }
         }
         prefs.edit().putString(recordKey(rootPath), found.joinToString(",")).apply()
         found.size

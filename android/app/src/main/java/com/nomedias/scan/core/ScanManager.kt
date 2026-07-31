@@ -41,11 +41,14 @@ object ScanManager {
             _state.update { it.copy(nomediaMoved = moved, message = "已移出 $moved 个 .nomedia") }
 
             val subDirs = op.listSubDirs(rootPath).ifEmpty { listOf(rootPath) }
-            val total = op.countMediaFiles(rootPath)
+            // 文件总数统计放后台（SAF 模式遍历大目录慢，不阻塞扫描启动；统计完自动更新分母）
+            scope.launch {
+                val total = op.countMediaFiles(rootPath)
+                _state.update { it.copy(totalFiles = total) }
+            }
             _state.update {
                 it.copy(
                     dirs = subDirs.map { p -> DirProgress(p) },
-                    totalFiles = total,
                     phase = Phase.SCANNING,
                     message = "正在分批触发媒体扫描…"
                 )
@@ -63,17 +66,19 @@ object ScanManager {
                     }
                 }
                 val indexed = MediaStoreQuery.countIndexed(context, rootPath)
+                val totalNow = _state.value.totalFiles
                 _state.update {
                     it.copy(
                         dirs = updated,
                         indexedFiles = indexed,
-                        message = "扫描批次 ${batchDirs.lastIndex + 1}/$totalBatch · 已索引 $indexed/$total"
+                        message = "扫描批次 ${batchDirs.lastIndex + 1}/$totalBatch · " +
+                                if (totalNow > 0) "已索引 $indexed/$totalNow" else "已索引 $indexed（统计文件数中…）"
                     )
                 }
                 Notifications.notifyScan(
                     context,
-                    if (total > 0) ((indexed * 100) / total).toInt().coerceIn(0, 100) else 0,
-                    indexed, total
+                    if (totalNow > 0) ((indexed * 100) / totalNow).toInt().coerceIn(0, 100) else 0,
+                    indexed, totalNow
                 )
             }
 
