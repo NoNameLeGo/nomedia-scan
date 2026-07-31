@@ -8,7 +8,9 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.DocumentsContract
+import android.text.InputType
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.RadioGroup
@@ -63,15 +65,55 @@ class MainActivity : AppCompatActivity() {
                     )
                 }
                 val path = treeUriToPath(uri)
-                if (path == null) {
-                    Toast.makeText(this, "无法解析该文件夹路径，请换一个位置", Toast.LENGTH_LONG).show()
-                } else {
-                    rootPath = path
-                    treeUri = uri
-                    tvFolder.text = path
+                val storageRoot = Environment.getExternalStorageDirectory().absolutePath
+                when {
+                    path == null -> {
+                        // 解析失败：Shizuku 模式可手动输入路径；SAF 模式提示重选并附诊断信息
+                        if (currentMode == Mode.SHIZUKU) {
+                            showManualPathDialog(uri)
+                        } else {
+                            Toast.makeText(
+                                this,
+                                "无法解析该文件夹路径，请重新选择。\nURI: $uri",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
+                    path == storageRoot -> {
+                        Toast.makeText(this, "请选择具体的文件夹（不要选存储根目录）", Toast.LENGTH_LONG).show()
+                    }
+                    else -> {
+                        rootPath = path
+                        treeUri = uri
+                        tvFolder.text = path
+                    }
                 }
             }
         }
+
+    /** 解析失败时（Shizuku 模式）让用户手动输入真实路径 */
+    private fun showManualPathDialog(uri: Uri) {
+        val input = EditText(this).apply {
+            hint = "/storage/emulated/0/你的文件夹"
+            inputType = InputType.TYPE_CLASS_TEXT
+        }
+        AlertDialog.Builder(this)
+            .setTitle("输入文件夹路径")
+            .setMessage("无法从文件选择器解析路径（$uri）。\n请手动输入完整路径，例如 /storage/emulated/0/xxx")
+            .setView(input)
+            .setPositiveButton("确定") { _, _ ->
+                val p = input.text.toString().trim()
+                if (p.startsWith("/")) {
+                    rootPath = p
+                    treeUri = null
+                    tvFolder.text = p
+                } else {
+                    Toast.makeText(this, "路径需以 / 开头", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -251,17 +293,20 @@ class MainActivity : AppCompatActivity() {
 
     // ---- 工具 ----
 
-    /** treeUri -> 真实路径（兼容 primary: / raw: 两种格式） */
+    /** treeUri -> 真实路径（兼容 primary / primary: / raw: 多种格式，失败时从 uri 路径段解码兜底） */
     private fun treeUriToPath(uri: Uri): String? {
         val docId = try {
             DocumentsContract.getDocumentId(uri)
         } catch (e: Exception) {
-            return null
+            Uri.decode(uri.lastPathSegment) ?: return null
         }
+        val storageRoot = Environment.getExternalStorageDirectory().absolutePath
         return when {
-            docId.startsWith("primary:") ->
-                "${Environment.getExternalStorageDirectory().absolutePath}/${docId.removePrefix("primary:")}"
             docId.startsWith("raw:") -> docId.removePrefix("raw:")
+            docId.startsWith("primary") -> {
+                val rel = docId.removePrefix("primary").removePrefix(":")
+                if (rel.isEmpty()) storageRoot else "$storageRoot/$rel"
+            }
             else -> null
         }
     }
