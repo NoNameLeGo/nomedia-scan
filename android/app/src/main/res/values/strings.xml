@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">nomedia 扫描助手</string>
+    <string name="notif_channel_scan">扫描进度</string>
+    <string name="notif_channel_remind">恢复提醒</string>
+</resources>
