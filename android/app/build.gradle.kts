@@ -44,6 +44,11 @@ android {
         jvmTarget = "17"
     }
 
+    lint {
+        // Shizuku API 涉及 hidden API（IParcelFileDescriptor），忽略 lintVital 报错
+        abortOnError = false
+    }
+
     applicationVariants.all {
         outputs.all {
             val output = this as BaseVariantOutputImpl

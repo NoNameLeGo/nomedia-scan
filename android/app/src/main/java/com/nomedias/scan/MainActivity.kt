@@ -109,8 +109,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private inner class ShizukuBinderListener : Shizuku.ShizukuBinderReceivedListener {
-        override fun binderReceived() = runOnUiThread { updateModeHint() }
+    private inner class ShizukuBinderListener : Shizuku.OnBinderReceivedListener {
+        override fun onBinderReceived() = runOnUiThread { updateModeHint() }
     }
 
     override fun onDestroy() {

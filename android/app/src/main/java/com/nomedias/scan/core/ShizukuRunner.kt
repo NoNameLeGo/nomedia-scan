@@ -40,7 +40,7 @@ object ShizukuRunner {
     }
 
     /** 在 Activity 收到授权结果后刷新监听状态 */
-    fun addBinderListener(listener: Shizuku.ShizukuBinderReceivedListener) {
+    fun addBinderListener(listener: Shizuku.OnBinderReceivedListener) {
         try {
             Shizuku.addBinderReceivedListenerSticky(listener)
         } catch (e: Throwable) {
@@ -48,7 +48,7 @@ object ShizukuRunner {
         }
     }
 
-    fun removeBinderListener(listener: Shizuku.ShizukuBinderReceivedListener) {
+    fun removeBinderListener(listener: Shizuku.OnBinderReceivedListener) {
         try {
             Shizuku.removeBinderReceivedListener(listener)
         } catch (e: Throwable) {
