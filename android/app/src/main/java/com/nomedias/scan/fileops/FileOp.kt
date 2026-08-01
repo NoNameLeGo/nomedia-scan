@@ -5,14 +5,18 @@ import android.net.Uri
 import com.nomedias.scan.core.Mode
 
 /**
- * 文件操作抽象：两种模式各自实现「移出/恢复 .nomedia、目录枚举、媒体文件计数」。
+ * 文件操作抽象（只针对目标文件夹**根目录**的 .nomedia）：
+ * 检测 / 移除 / 添加 .nomedia，以及目录枚举、媒体文件计数。
  */
 interface FileOp {
-    /** 移出目标目录下所有 .nomedia（改名 .nomedia.bak / 记录后删除），返回处理数量 */
-    suspend fun moveOut(rootPath: String): Int
+    /** 根目录是否存在 .nomedia */
+    suspend fun detectNomedia(rootPath: String): Boolean
 
-    /** 恢复所有 .nomedia，返回恢复数量 */
-    suspend fun restore(rootPath: String): Int
+    /** 移除根目录的 .nomedia，返回是否成功 */
+    suspend fun removeNomedia(rootPath: String): Boolean
+
+    /** 在根目录创建 .nomedia，返回是否成功 */
+    suspend fun addNomedia(rootPath: String): Boolean
 
     /** 顶层子目录真实路径列表（用于分批扫描） */
     suspend fun listSubDirs(rootPath: String): List<String>

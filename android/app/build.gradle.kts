@@ -13,8 +13,8 @@ android {
         applicationId = "com.nomedias.scan"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "beta0.0.3"
+        versionCode = 4
+        versionName = "beta0.0.4"
     }
 
     signingConfigs {

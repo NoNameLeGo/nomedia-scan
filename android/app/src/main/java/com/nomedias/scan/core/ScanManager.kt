@@ -7,14 +7,16 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * 全局调度器：编排「临时打开」与「恢复隐藏」两大流程。
- * 由前台服务驱动，UI 通过 state 订阅进度。
+ * 全局调度器：提供四个独立原子操作——
+ * 选择文件夹（select + 自动 detect）、移除 .nomedia、添加 .nomedia、触发媒体扫描。
+ * UI 通过 state 订阅状态与进度。
  */
 object ScanManager {
 
@@ -23,124 +25,135 @@ object ScanManager {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var job: Job? = null
+    private var pollingJob: Job? = null
 
-    // ---- 打开流程 ----
-
-    fun startOpen(context: Context, rootPath: String, treeUri: Uri?, mode: Mode) {
-        if (job?.isActive == true) return
-        _state.value = ScanState(mode = mode, rootPath = rootPath, treeUri = treeUri?.toString())
-        job = scope.launch { doOpen(context, rootPath, treeUri, mode) }
+    private fun currentFileOp(context: Context): FileOp {
+        val s = _state.value
+        return FileOp.create(context, s.mode, s.treeUri?.let(Uri::parse))
     }
 
-    private suspend fun doOpen(context: Context, rootPath: String, treeUri: Uri?, mode: Mode) {
-        try {
-            _state.update { it.copy(phase = Phase.OPENING, message = "正在移出 .nomedia…") }
-            val op = FileOp.create(context, mode, treeUri)
+    /** 选择文件夹后初始化状态 */
+    fun select(rootPath: String, treeUri: Uri?, mode: Mode) {
+        job?.cancel()
+        pollingJob?.cancel()
+        _state.value = ScanState(mode = mode, rootPath = rootPath, treeUri = treeUri?.toString())
+    }
 
-            val moved = op.moveOut(rootPath)
-            _state.update { it.copy(nomediaMoved = moved, message = "已移出 $moved 个 .nomedia") }
-
-            val subDirs = op.listSubDirs(rootPath).ifEmpty { listOf(rootPath) }
-            // 文件总数统计放后台（SAF 模式遍历大目录慢，不阻塞扫描启动；统计完自动更新分母）
-            scope.launch {
-                val total = op.countMediaFiles(rootPath)
-                _state.update { it.copy(totalFiles = total) }
-            }
-            _state.update {
-                it.copy(
-                    dirs = subDirs.map { p -> DirProgress(p) },
-                    phase = Phase.SCANNING,
-                    message = "正在分批触发媒体扫描…"
-                )
-            }
-
-            MediaScanner.scanDirs(context, subDirs) { _, totalBatch, batchDirs, timeoutDirs ->
-                val cur = _state.value
-                val updated = cur.dirs.map { d ->
-                    when {
-                        timeoutDirs.contains(d.path) ->
-                            d.copy(status = DirStatus.TIMEOUT, note = "可能未扫完")
-                        batchDirs.contains(d.path) && d.status == DirStatus.PENDING ->
-                            d.copy(status = DirStatus.DONE)
-                        else -> d
+    /** 检测根目录是否有 .nomedia（选文件夹后 / 切换模式后调用） */
+    fun detect(context: Context) {
+        val root = _state.value.rootPath ?: return
+        scope.launch {
+            runCatching { currentFileOp(context).detectNomedia(root) }
+                .onSuccess { has ->
+                    _state.update {
+                        it.copy(
+                            hasNomedia = has,
+                            message = if (has) "检测到 .nomedia —— 当前图库不可见"
+                                      else "未检测到 .nomedia —— 图库可见"
+                        )
                     }
                 }
-                val indexed = MediaStoreQuery.countIndexed(context, rootPath)
-                val totalNow = _state.value.totalFiles
-                _state.update {
-                    it.copy(
-                        dirs = updated,
-                        indexedFiles = indexed,
-                        message = "扫描批次 ${batchDirs.lastIndex + 1}/$totalBatch · " +
-                                if (totalNow > 0) "已索引 $indexed/$totalNow" else "已索引 $indexed（统计文件数中…）"
-                    )
+                .onFailure { e ->
+                    _state.update { it.copy(message = "检测失败：${e.message}") }
                 }
-                Notifications.notifyScan(
-                    context,
-                    if (totalNow > 0) ((indexed * 100) / totalNow).toInt().coerceIn(0, 100) else 0,
-                    indexed, totalNow
-                )
-            }
-
-            _state.update { it.copy(phase = Phase.BACKUP_WINDOW, message = "去网盘备份相册，完成后回来点「恢复隐藏」") }
-            Notifications.notifyBackupReminder(context)
-        } catch (e: Throwable) {
-            _state.update { it.copy(phase = Phase.IDLE, message = "打开失败：${e.message}") }
         }
     }
 
-    // ---- 恢复流程 ----
-
-    fun startRestore(context: Context) {
+    /** 移除根目录 .nomedia（之后点「触发媒体扫描」让图库出现） */
+    fun removeNomedia(context: Context) {
+        val root = _state.value.rootPath ?: return
         if (job?.isActive == true) return
-        val cur = _state.value
-        val root = cur.rootPath ?: return
-        val mode = cur.mode
-        val treeUri = cur.treeUri?.let(Uri::parse)
-        job = scope.launch { doRestore(context, root, treeUri, mode) }
+        job = scope.launch {
+            _state.update { it.copy(phase = Phase.REMOVING, message = "正在移除 .nomedia…") }
+            runCatching { currentFileOp(context).removeNomedia(root) }
+                .onSuccess { ok ->
+                    _state.update {
+                        it.copy(
+                            phase = Phase.IDLE,
+                            hasNomedia = false,
+                            message = if (ok) "已移除 .nomedia —— 点「触发媒体扫描」让图库显示"
+                                      else "移除失败：文件不存在或无权访问"
+                        )
+                    }
+                }
+                .onFailure { e ->
+                    _state.update { it.copy(phase = Phase.IDLE, message = "移除失败：${e.message}") }
+                }
+        }
     }
 
-    private suspend fun doRestore(context: Context, rootPath: String, treeUri: Uri?, mode: Mode) {
-        try {
-            _state.update { it.copy(phase = Phase.RESTORING, message = "正在恢复 .nomedia…") }
-            val op = FileOp.create(context, mode, treeUri)
-
-            val restored = op.restore(rootPath)
-            _state.update { it.copy(nomediaRestored = restored, message = "已恢复 $restored 个 .nomedia，清理索引中…") }
-
-            // 重扫目录，让 MediaProvider 发现 .nomedia 并自动清理索引
-            MediaScanner.scanSingle(context, rootPath)
-
-            // 双保险清理
-            if (mode == Mode.SHIZUKU) {
-                try {
-                    ShizukuRunner.exec(
-                        "content delete --uri content://media/external/images/media " +
-                                "--where \"_data LIKE '${rootPath}/%'\""
-                    )
-                    ShizukuRunner.exec(
-                        "content delete --uri content://media/external/video/media " +
-                                "--where \"_data LIKE '${rootPath}/%'\""
-                    )
-                } catch (e: Throwable) {
-                    // content delete 失败不影响主流程
+    /** 在根目录创建 .nomedia（之后点「触发媒体扫描」清理图库索引） */
+    fun addNomedia(context: Context) {
+        val root = _state.value.rootPath ?: return
+        if (job?.isActive == true) return
+        job = scope.launch {
+            _state.update { it.copy(phase = Phase.ADDING, message = "正在添加 .nomedia…") }
+            runCatching { currentFileOp(context).addNomedia(root) }
+                .onSuccess { ok ->
+                    _state.update {
+                        it.copy(
+                            phase = Phase.IDLE,
+                            hasNomedia = true,
+                            message = if (ok) "已添加 .nomedia —— 点「触发媒体扫描」清理图库索引"
+                                      else "添加失败：目录不可写"
+                        )
+                    }
                 }
-            } else {
-                MediaStoreQuery.deleteIndexed(context, rootPath)
+                .onFailure { e ->
+                    _state.update { it.copy(phase = Phase.IDLE, message = "添加失败：${e.message}") }
+                }
+        }
+    }
+
+    /** 触发媒体扫描（入队后由系统后台索引，进度轮询展示） */
+    fun startScan(context: Context) {
+        val root = _state.value.rootPath ?: return
+        if (job?.isActive == true) return
+        job = scope.launch {
+            _state.update {
+                it.copy(phase = Phase.SCANNING, dirs = emptyList(), indexedFiles = 0, message = "正在触发媒体扫描…")
+            }
+            val op = currentFileOp(context)
+
+            // 子目录分批入队（不等待系统回调，永不阻塞）
+            runCatching {
+                val subDirs = op.listSubDirs(root).ifEmpty { listOf(root) }
+                _state.update { it.copy(dirs = subDirs.map { p -> DirProgress(p) }) }
+                MediaScanner.scanDirs(context, subDirs)
             }
 
-            Notifications.cancelAll(context)
-            Notifications.notifyRestoreDone(context)
+            // 文件总数后台统计（进度分母）
+            scope.launch {
+                runCatching { op.countMediaFiles(root) }
+                    .onSuccess { total -> _state.update { it.copy(totalFiles = total) } }
+            }
+
+            startPolling(context, root)
+        }
+    }
+
+    /** 轮询 MediaStore 计数刷新进度；最多 5 分钟（每 3s 一次） */
+    private fun startPolling(context: Context, root: String) {
+        pollingJob?.cancel()
+        pollingJob = scope.launch {
+            for (i in 0 until 100) {
+                delay(3000)
+                val idx = MediaStoreQuery.countIndexed(context, root)
+                val total = _state.value.totalFiles
+                _state.update {
+                    it.copy(
+                        indexedFiles = idx,
+                        message = if (total > 0) "等待系统索引…已索引 $idx / $total"
+                                  else "等待系统索引…已索引 $idx"
+                    )
+                }
+            }
             _state.update {
                 it.copy(
                     phase = Phase.IDLE,
-                    dirs = emptyList(),
-                    indexedFiles = 0,
-                    message = "已恢复隐藏，图库索引已清理"
+                    message = "轮询结束（系统可能仍在后台索引，可再点「触发媒体扫描」刷新）"
                 )
             }
-        } catch (e: Throwable) {
-            _state.update { it.copy(phase = Phase.IDLE, message = "恢复失败：${e.message}") }
         }
     }
 }

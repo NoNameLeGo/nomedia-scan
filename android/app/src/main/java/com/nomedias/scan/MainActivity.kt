@@ -16,7 +16,6 @@ import android.widget.ProgressBar
 import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -39,8 +38,6 @@ class MainActivity : AppCompatActivity() {
         const val REQ_SHIZUKU = 101
     }
 
-    private var rootPath: String? = null
-    private var treeUri: Uri? = null
     private var currentMode: Mode = Mode.SAFE
 
     private lateinit var tvFolder: TextView
@@ -50,8 +47,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var progressBar: ProgressBar
     private lateinit var tvProgress: TextView
     private lateinit var dirsContainer: LinearLayout
-    private lateinit var btnOpen: Button
-    private lateinit var btnRestore: Button
+    private lateinit var btnRemove: Button
+    private lateinit var btnAdd: Button
+    private lateinit var btnScan: Button
     private lateinit var groupMode: RadioGroup
     private lateinit var tvShizukuHint: TextView
 
@@ -83,9 +81,9 @@ class MainActivity : AppCompatActivity() {
                         Toast.makeText(this, "请选择具体的文件夹（不要选存储根目录）", Toast.LENGTH_LONG).show()
                     }
                     else -> {
-                        rootPath = path
-                        treeUri = uri
                         tvFolder.text = path
+                        ScanManager.select(path, uri, currentMode)
+                        ScanManager.detect(this)
                     }
                 }
             }
@@ -104,9 +102,9 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("确定") { _, _ ->
                 val p = input.text.toString().trim()
                 if (p.startsWith("/")) {
-                    rootPath = p
-                    treeUri = null
                     tvFolder.text = p
+                    ScanManager.select(p, null, currentMode)
+                    ScanManager.detect(this)
                 } else {
                     Toast.makeText(this, "路径需以 / 开头", Toast.LENGTH_SHORT).show()
                 }
@@ -126,8 +124,9 @@ class MainActivity : AppCompatActivity() {
         progressBar = findViewById(R.id.progressBar)
         tvProgress = findViewById(R.id.tvProgress)
         dirsContainer = findViewById(R.id.dirsContainer)
-        btnOpen = findViewById(R.id.btnOpen)
-        btnRestore = findViewById(R.id.btnRestore)
+        btnRemove = findViewById(R.id.btnRemove)
+        btnAdd = findViewById(R.id.btnAdd)
+        btnScan = findViewById(R.id.btnScan)
         groupMode = findViewById(R.id.groupMode)
         tvShizukuHint = findViewById(R.id.tvShizukuHint)
 
@@ -136,10 +135,15 @@ class MainActivity : AppCompatActivity() {
         groupMode.setOnCheckedChangeListener { _, checkedId ->
             currentMode = if (checkedId == R.id.radioShizuku) Mode.SHIZUKU else Mode.SAFE
             updateModeHint()
+            // 切换模式后重新检测（fileOp 变化；Shizuku 模式可输入路径，SAF 模式沿用已授权 treeUri）
+            if (ScanManager.state.value.rootPath != null) {
+                ScanManager.detect(this)
+            }
         }
 
-        btnOpen.setOnClickListener { onOpenClicked() }
-        btnRestore.setOnClickListener { onRestoreClicked() }
+        btnRemove.setOnClickListener { ScanManager.removeNomedia(this) }
+        btnAdd.setOnClickListener { ScanManager.addNomedia(this) }
+        btnScan.setOnClickListener { ScanService.startScan(this) }
 
         // Shizuku 连接状态监听
         ShizukuRunner.addBinderListener(ShizukuBinderListener())
@@ -189,47 +193,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ---- 交互 ----
-
-    private fun onOpenClicked() {
-        val path = rootPath ?: run {
-            Toast.makeText(this, "请先选择目标文件夹", Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (currentMode == Mode.SHIZUKU && !ShizukuRunner.hasPermission) {
-            Toast.makeText(this, "需要先授权 Shizuku（点右上角模式提示里的授权）", Toast.LENGTH_LONG).show()
-            ShizukuRunner.requestPermission(REQ_SHIZUKU)
-            return
-        }
-        AlertDialog.Builder(this)
-            .setTitle("临时打开媒体扫描")
-            .setMessage("将移出该文件夹下的所有 .nomedia，触发系统媒体扫描。\n\n$path\n\n开始后请保持本应用在前台直到扫描完成。")
-            .setPositiveButton("开始") { _, _ ->
-                ScanService.startOpen(this, path, treeUri, currentMode.name)
-            }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
-    private fun onRestoreClicked() {
-        if (ScanManager.state.value.rootPath == null) {
-            Toast.makeText(this, "当前没有打开过的文件夹", Toast.LENGTH_SHORT).show()
-            return
-        }
-        AlertDialog.Builder(this)
-            .setTitle("恢复隐藏")
-            .setMessage("将放回所有 .nomedia 并清理媒体库索引，图库恢复原样。确定？")
-            .setPositiveButton("确定") { _, _ -> ScanService.startRestore(this) }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
     // ---- UI 渲染 ----
 
     private fun updateModeHint() {
         val shizukuOk = ShizukuRunner.isConnected && ShizukuRunner.hasPermission
         tvShizukuHint.text = if (shizukuOk) {
-            "Shizuku 已连接并授权，文件操作秒级完成"
+            "Shizuku 已连接并授权"
         } else {
             "Shizuku 未就绪：请先安装/激活 Shizuku，再点此授权"
         }
@@ -243,51 +212,41 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun render(s: com.nomedias.scan.core.ScanState) {
-        tvStatus.text = when (s.phase) {
-            Phase.IDLE -> "状态：空闲"
-            Phase.OPENING -> "状态：正在移出 .nomedia…"
-            Phase.SCANNING -> "状态：正在扫描媒体库…"
-            Phase.BACKUP_WINDOW -> "状态：备份窗口期（去网盘备份，完成后点恢复）"
-            Phase.RESTORING -> "状态：正在恢复 .nomedia…"
+        // 状态栏
+        val nomediaText = when (s.hasNomedia) {
+            null -> "（未检测）"
+            true -> "存在 —— 图库不可见"
+            false -> "不存在 —— 图库可见"
         }
+        tvStatus.text = "文件夹：${s.rootPath ?: "未选择"}\n.nomedia：$nomediaText"
         tvMessage.text = s.message
-        tvStats.text = "移出 .nomedia：${s.nomediaMoved} 个 · 恢复：${s.nomediaRestored} 个"
-        if (s.rootPath != null && tvFolder.text.isEmpty()) {
-            tvFolder.text = s.rootPath
-        }
+        tvStats.text = "模式：${if (s.mode == Mode.SHIZUKU) "Shizuku" else "SAF"}" +
+                if (s.totalFiles > 0) " · 文件数：${s.totalFiles}" else ""
 
+        // 按钮状态
+        val idle = s.phase == Phase.IDLE
+        btnRemove.isVisible = idle && s.hasNomedia == true
+        btnAdd.isVisible = idle && s.hasNomedia == false && s.rootPath != null
+        btnScan.isEnabled = idle && s.rootPath != null
+
+        // 进度区
         val scanning = s.phase == Phase.SCANNING
-        val backup = s.phase == Phase.BACKUP_WINDOW
-        val restoring = s.phase == Phase.RESTORING
         progressBar.isVisible = scanning
         tvProgress.isVisible = scanning
-        btnOpen.isEnabled = s.phase == Phase.IDLE
-        btnRestore.isEnabled = s.phase == Phase.IDLE && s.rootPath != null
-        btnRestore.isVisible = s.phase == Phase.IDLE || s.phase == Phase.BACKUP_WINDOW
-
         if (scanning) {
             val pct = if (s.totalFiles > 0) ((s.indexedFiles * 100) / s.totalFiles).toInt().coerceIn(0, 100) else 0
             progressBar.progress = pct
-            tvProgress.text = "已索引 ${s.indexedFiles} / ${s.totalFiles} 个文件（$pct%）"
+            tvProgress.text = if (s.totalFiles > 0) "已索引 ${s.indexedFiles} / ${s.totalFiles}（$pct%）" else "已索引 ${s.indexedFiles}"
         }
 
+        // 子目录列表
         dirsContainer.removeAllViews()
-        if (s.dirs.isNotEmpty() && (scanning || restoring)) {
-            for (d in s.dirs) {
-                val tv = TextView(this)
-                tv.textSize = 13f
-                tv.text = when (d.status) {
-                    com.nomedias.scan.core.DirStatus.PENDING -> "○ ${d.path}"
-                    com.nomedias.scan.core.DirStatus.SCANNING -> "… ${d.path}"
-                    com.nomedias.scan.core.DirStatus.DONE -> "✓ ${d.path}"
-                    com.nomedias.scan.core.DirStatus.TIMEOUT -> "△ ${d.path}（${d.note}）"
-                }
-                tv.setPadding(0, 2, 0, 2)
-                dirsContainer.addView(tv)
-            }
-        }
-        if (backup) {
-            Toast.makeText(this, "扫描完成！去网盘备份，完成后回来点「恢复隐藏」", Toast.LENGTH_LONG).show()
+        for (d in s.dirs) {
+            val tv = TextView(this)
+            tv.textSize = 13f
+            tv.text = "○ ${d.path}"
+            tv.setPadding(0, 2, 0, 2)
+            dirsContainer.addView(tv)
         }
     }
 

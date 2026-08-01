@@ -21,7 +21,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="临时放开超大文件夹的媒体扫描，备份完再隐藏回去"
+            android:text="控制 .nomedia 开关 + 触发媒体扫描"
             android:textSize="13sp"
             android:textColor="#888"
             android:paddingBottom="16dp" />
@@ -62,7 +62,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Shizuku 模式（快）" />
+                android:text="Shizuku 模式" />
 
             <RadioButton
                 android:id="@+id/radioSafe"
@@ -70,7 +70,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:checked="true"
-                android:text="SAF 模式（免安装）" />
+                android:text="SAF 模式" />
         </RadioGroup>
 
         <TextView
@@ -86,8 +86,7 @@
             android:id="@+id/tvStatus"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="状态：空闲"
-            android:textSize="15sp"
+            android:textSize="14sp"
             android:textStyle="bold"
             android:paddingBottom="4dp" />
 
@@ -106,12 +105,37 @@
             android:textColor="#888"
             android:paddingBottom="12dp" />
 
+        <Button
+            android:id="@+id/btnRemove"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="移除 .nomedia（让图库可见）"
+            android:paddingTop="12dp"
+            android:paddingBottom="12dp" />
+
+        <Button
+            android:id="@+id/btnAdd"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="添加 .nomedia（恢复隐藏）"
+            android:paddingTop="12dp"
+            android:paddingBottom="12dp" />
+
+        <Button
+            android:id="@+id/btnScan"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="触发媒体扫描"
+            android:paddingTop="12dp"
+            android:paddingBottom="12dp" />
+
         <ProgressBar
             android:id="@+id/progressBar"
             style="?android:attr/progressBarStyleHorizontal"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:visibility="gone" />
+            android:visibility="gone"
+            android:paddingTop="12dp" />
 
         <TextView
             android:id="@+id/tvProgress"
@@ -128,21 +152,5 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:paddingBottom="8dp" />
-
-        <Button
-            android:id="@+id/btnOpen"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="临时打开（移出 .nomedia + 扫描）"
-            android:paddingTop="12dp"
-            android:paddingBottom="12dp" />
-
-        <Button
-            android:id="@+id/btnRestore"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="恢复隐藏（放回 .nomedia + 清理索引）"
-            android:paddingTop="12dp"
-            android:paddingBottom="12dp" />
     </LinearLayout>
 </ScrollView>
