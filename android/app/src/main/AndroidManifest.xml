@@ -13,6 +13,11 @@
     <!-- 前台服务：长时间扫描 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- 所有文件访问（Android 11+）：自定义目录的 MediaScanner 扫描必须此权限才生效，
+         SAF 授权对 scanFile 无效；用户可自行决定是否开启 -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
 
     <!-- Shizuku -->
     <uses-permission

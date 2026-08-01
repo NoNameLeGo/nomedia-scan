@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.DocumentsContract
+import android.provider.Settings
 import android.text.InputType
 import android.widget.Button
 import android.widget.EditText
@@ -52,6 +53,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnScan: Button
     private lateinit var groupMode: RadioGroup
     private lateinit var tvShizukuHint: TextView
+    private lateinit var tvPermHint: TextView
 
     private val pickFolder =
         registerForActivityResult(OpenDocumentTree()) { uri: Uri? ->
@@ -129,6 +131,7 @@ class MainActivity : AppCompatActivity() {
         btnScan = findViewById(R.id.btnScan)
         groupMode = findViewById(R.id.groupMode)
         tvShizukuHint = findViewById(R.id.tvShizukuHint)
+        tvPermHint = findViewById(R.id.tvPermHint)
 
         findViewById<Button>(R.id.btnPick).setOnClickListener { pickFolder.launch(null) }
 
@@ -143,16 +146,40 @@ class MainActivity : AppCompatActivity() {
 
         btnRemove.setOnClickListener { ScanManager.removeNomedia(this) }
         btnAdd.setOnClickListener { ScanManager.addNomedia(this) }
-        btnScan.setOnClickListener { ScanService.startScan(this) }
+        btnScan.setOnClickListener {
+            if (!hasAllFilesAccess()) {
+                AlertDialog.Builder(this)
+                    .setTitle("需要「所有文件访问」权限")
+                    .setMessage("Android 11+ 上，自定义文件夹（非 DCIM/Pictures 等标准媒体目录）的扫描必须开启该权限，否则系统不会把图片索引进媒体库。\n\n前往开启？")
+                    .setPositiveButton("去开启") { _, _ -> gotoAllFilesAccess() }
+                    .setNegativeButton("仍然尝试", { _, _ -> ScanService.startScan(this) })
+                    .show()
+            } else {
+                ScanService.startScan(this)
+            }
+        }
+        tvPermHint.setOnClickListener {
+            if (!hasAllFilesAccess() && Build.VERSION.SDK_INT >= 30) {
+                gotoAllFilesAccess()
+            } else if (isPartialPhotoAccess()) {
+                gotoAppSettings()
+            }
+        }
 
         // Shizuku 连接状态监听
         ShizukuRunner.addBinderListener(ShizukuBinderListener())
 
         requestRuntimePermissions()
+        refreshPermHint()
 
         lifecycleScope.launch {
             ScanManager.state.collect { render(it) }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshPermHint()
     }
 
     private inner class ShizukuBinderListener : Shizuku.OnBinderReceivedListener {
@@ -165,6 +192,58 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ---- 权限 ----
+
+    /** Android 11+：自定义目录扫描需要「所有文件访问」；10 及以下始终视为可用 */
+    private fun hasAllFilesAccess(): Boolean =
+        Build.VERSION.SDK_INT < 30 || Environment.isExternalStorageManager()
+
+    /** Android 14+：检测是否处于「选择照片」授权模式（媒体库查询受限） */
+    private fun isPartialPhotoAccess(): Boolean =
+        Build.VERSION.SDK_INT >= 34 &&
+                ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
+                ) == PackageManager.PERMISSION_GRANTED
+
+    /** 刷新权限状态提示区 */
+    private fun refreshPermHint() {
+        val s = StringBuilder()
+        if (Build.VERSION.SDK_INT >= 30) {
+            s.append(
+                if (hasAllFilesAccess()) "✓ 所有文件访问：已开启（自定义目录可扫描）\n"
+                else "✗ 所有文件访问：未开启（自定义目录扫描可能无效，点此开启）\n"
+            )
+        }
+        if (Build.VERSION.SDK_INT >= 34) {
+            s.append(
+                if (isPartialPhotoAccess()) "⚠ 照片权限：仅「选择照片」，查询受限，点此改为全部照片\n"
+                else "✓ 照片权限：全部照片\n"
+            )
+        }
+        tvPermHint.text = s.toString().trim()
+        tvPermHint.isVisible = s.isNotEmpty()
+    }
+
+    private fun gotoAllFilesAccess() {
+        runCatching {
+            startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.parse("package:$packageName")
+                )
+            )
+        }
+    }
+
+    private fun gotoAppSettings() {
+        runCatching {
+            startActivity(
+                Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:$packageName")
+                )
+            )
+        }
+    }
 
     private fun requestRuntimePermissions() {
         val perms = mutableListOf<String>()

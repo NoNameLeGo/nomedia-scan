@@ -83,6 +83,14 @@
             android:paddingBottom="12dp" />
 
         <TextView
+            android:id="@+id/tvPermHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:textColor="#BA7517"
+            android:paddingBottom="12dp" />
+
+        <TextView
             android:id="@+id/tvStatus"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
