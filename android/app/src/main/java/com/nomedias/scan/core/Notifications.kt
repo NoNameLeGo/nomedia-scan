@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
 import com.nomedias.scan.MainActivity
+import com.nomedias.scan.R
 
 /** 通知管理：扫描进度通知（前台服务常驻） */
 object Notifications {
